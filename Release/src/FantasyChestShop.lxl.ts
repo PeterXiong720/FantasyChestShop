@@ -9,7 +9,7 @@ mc.listen("onServerStarted", () => {
 
 var DEBUG: boolean = false;
 
-var Version = "0.1.2";
+var Version = "1.0.1";
 
 var Dir = "./Plugins/PlayerShop/"
 

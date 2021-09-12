@@ -1,5 +1,5 @@
 # FantasyChestShop
-一款BDS(基岩专用服务器，以下简称BDS)箱子商店插件，基于[LiteXLoader](https://github.com/LiteLDev/LiteXLoader)开发。
+一款BDS(基岩专用服务器，以下简称BDS)箱子商店插件，基于[LiteXLoader](https://github.com/LiteLDev/LiteXLoader)平台开发。
 ### 安装和使用：
 要使用此插件，你需要先安装[LiteLoader](https://www.minebbs.com/resources/liteloader.2059/)和[LiteXLoader](https://github.com/LiteLDev/LiteXLoader)，然后启动BDS，将`FantasyChestShop.min.js`粘贴到./plugins目录下即可。此时你可以重启BDS或者使用`lxl load ./plugins/FantasyChestShop.min.js`加载此插件。
 - `/playershop`：打开玩家商店列表。（对于具体某个商店，也可以直接点击箱子打开）

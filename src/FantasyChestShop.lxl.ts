@@ -9,6 +9,8 @@ mc.listen("onServerStarted", () => {
 
 var DEBUG: boolean = false;
 
+var Version = "0.1.2";
+
 var Dir = "./Plugins/PlayerShop/"
 
 var Config: Configuration;
@@ -16,15 +18,25 @@ var Config: Configuration;
 var ShopPosList = new Array<IntPos>();
 
 function init() {
+    log("[FantasyChestShop] =========================");
+    log("[FantasyChestShop] FantasyChestShop v" + Version);
+    log("[FantasyChestShop] Plugin loaded");
+    log("[FantasyChestShop] 作者：PeterXiong720");
+
     if (!file.exists(Dir)) {
         file.mkdir(Dir);
     }
     if (!file.exists(Dir + "Config.json")) {
+        log("[FantasyChestShop] 未找到配置文件，正在创建...");
         Config = new Configuration();
         DataHelper.SaveData();
+        log("[FantasyChestShop] 已创建配置文件：" + Dir + "Config.json");
     } else {
         Config = new Configuration(JSON.parse(file.readFrom(Dir + "Config.json")));
+        log("[FantasyChestShop] 已加载配置文件：" + Dir + "Config.json");
     }
+
+    log("[FantasyChestShop] =========================");
 }
 
 function updateShopList() {
@@ -267,8 +279,33 @@ mc.listen("onOpenContainer", (player, block) => {
         log(tempPos,"\t",_shop.Pos)
         //*/
         if (JSON.stringify(_shop.Pos) == JSON.stringify(tempPos)) {
-            let MainForm = new ShopMain(player, block.pos);
-            MainForm.Display();
+            // let MainForm = new ShopMain(player, block.pos);
+            // MainForm.Display();
+            if (player.isOP()) {
+                player.sendSimpleForm(
+                    Format.Bold + Format.DarkAqua + "箱子商店",
+                    "Choose...",
+                    ["进入商店", "进入后台"],
+                    ["", ""],
+                    (pl: Player, id: number) => {
+                        if (id != undefined) {
+                            switch (id) {
+                                case 0:
+                                    let MainForm = new ShopMain(player, block.pos);
+                                    MainForm.Display();
+                                    break;
+                                case 1:
+                                    let Backstage = new ShopBackstageManagementForm(player, block);
+                                    Backstage.Display();
+                                    break;
+                            }
+                        }
+                    }
+                )
+            } else {
+                let MainForm = new ShopMain(player, block.pos);
+                MainForm.Display();
+            }
             result = false;
         }
     });
@@ -354,9 +391,9 @@ class Configuration {
         } else {
             this.Money = (config.Money == undefined) ? "LLMoney" : config.Money;
             this.Reg = (config.Reg == undefined) ? 0 : config.Reg;
-            this.TaxRate = (config.TaxRate == undefined) ? 0 : config.TaxRate;
+            this.TaxRate = (config.TaxRate == undefined) ? 0.1 : config.TaxRate;
             if (this.TaxRate < 0 || this.TaxRate >= 1) {
-                this.TaxRate = 0;
+                this.TaxRate = 0.1;
             }
             if (config.ShopKeepers != undefined) {
                 this.ShopKeepers = new Map<string, Array<string>>(Object.entries(config.ShopKeepers));
@@ -625,8 +662,9 @@ class CheckoutForm {
                 player.sendModalForm("错误", "余额不足，交易失败。", "确定", "取消", (pl, id) => { });
                 return;
             }
-            //收付款
-            let after_tax_money = (total_price * (1 - Config.TaxRate));
+            /*收付款*/
+            let after_tax_money = (total_price * (1 - Config.TaxRate));//税后款
+            after_tax_money = Math.round(after_tax_money);//四舍五入取整
             let rdMoney = ReduceMoney(player, total_price);
             let addMoney = AddMoney(shop.Shopkeeper, after_tax_money);
             if (!addMoney && player.xuid != shop.Shopkeeper) {//加钱失败，退还买主
@@ -882,7 +920,7 @@ class ShopBackstageManagementForm {
             "§l§b商店信息§r：" +
             "\n§l店主：  §e" + mc.getPlayer(this.Shop.Shopkeeper).name +
             "\n§r§l商店名称：  §e" + this.Shop.Name +
-            "\n§r§l总营业额：  §e" + this.Shop.Turnover +
+            "\n§r§l税后营收：  §e" + this.Shop.Turnover + "§f(税率：" + Config.TaxRate + ")" +
             "\n§r§l总成交数：  §e" + this.Shop.TotalSales +
             "\n"
         );
@@ -926,8 +964,8 @@ class ShopBackstageManagementForm {
                 //编辑商品
                 if (Instance != undefined) {
                     Instance.Player = player;
-                    //player.sendForm();
-                    //*
+                    player.sendForm(Instance.EditItemMainForm(), ShopBackstageManagementForm.EditItemMain);
+                    /*
                     player.sendModalForm("阿巴阿巴阿巴阿巴", "尽情期待", "返回", "取消", (pl, id) => {
                         if (id != null && id == 1) {
                             Instance?.Display();
@@ -940,8 +978,8 @@ class ShopBackstageManagementForm {
                 //编辑商店信息
                 if (Instance != undefined) {
                     Instance.Player = player;
-                    //player.sendForm();
-                    //*
+                    player.sendForm(Instance.EditShopInfoForm(), ShopBackstageManagementForm.EditShopInfo);
+                    /*
                     player.sendModalForm("阿巴阿巴阿巴阿巴", "尽情期待", "返回", "取消", (pl, id) => {
                         if (id != null && id == 1) {
                             Instance?.Display();
@@ -1054,6 +1092,144 @@ class ShopBackstageManagementForm {
                 }
             } else {
                 player.sendModalForm("错误", "商品添加失败！\n当前箱子没有足够的空间", "确定", "取消", (pl, id) => {
+                    if (id != null && id == 1) {
+                        Instance?.Display();
+                    }
+                });
+            }
+        }
+    }
+
+    private EditItemMainForm(): SimpleForm {
+        let form = mc.newSimpleForm();
+        if (this.Shop != undefined && this.Shop.Goods.length > 0) {
+            form = form.setTitle("§l编辑商品");
+            form = form.setContent(
+                Format.Bold + Format.Aqua + "全部商品："
+            );
+            this.Shop.Goods.forEach((comm: Commodity) => {
+                let name = comm.DisplayName;
+                form = form.addButton(Format.Bold + name);
+            });
+        } else {
+            form = form.setTitle("§l编辑商品");
+            form = form.setContent(
+                Format.Bold + Format.Aqua + "欢迎光临！" +
+                Format.Bold + Format.Red + "\n全部商品已售罄，赶快补货吧！"
+            );
+            let instance = this;
+            setTimeout(() => {
+                instance.Display();
+            }, 1000);
+        }
+
+        return form;
+    }
+
+    private static EditItemMain(player: Player, id: number) {
+        let Instance = ShopBackstageManagementForm.Instances.get(player.xuid);
+        let Index: number;
+        let Item: Commodity;
+
+        let EditForm = function (): CustomForm {
+            let form = mc.newCustomForm();
+            form = form.setTitle("§l编辑商品");
+            form = form.addLabel(
+                Format.Gray + "=================" + "§r§l编辑商品信息§r" + Format.Gray + "================\n" +
+                Format.Aqua + "勾选\"下架\"后，需将价格设置为小于零的值（防止误操作）"
+            );
+            form = form.addInput("商品显示名称：", "商品显示的名称", Item.DisplayName);
+            form = form.addInput("商品价格：", "价格", Item.Price.toString());
+            form = form.addSwitch("下架该商品", false);
+            return form;
+        }
+        let Edit = function (pl: Player, data: Array<any>) {
+            if (data != undefined && Instance != undefined) {
+                let name = data[1];
+                let price = Number(data[2]);
+                if (data[3] == true && price < 0) {//下架
+                    let chest = Instance.Chest.getContainer();
+                    let _ietm = chest.getItem(Item.Index);
+                    if (pl.giveItem(_ietm)) {
+                        _ietm.setNull();
+                        Instance.Shop.Goods.splice(Index, 1);
+
+                        player.sendModalForm("成功", "商品已下架", "返回", "取消", (pl, id) => {
+                            if (id != null && id == 1) {
+                                Instance?.Display();
+                            }
+                        });
+                    }
+                } else if (Number.isInteger(price) && price > 0) {//修改
+                    if (Item.DisplayName != name) { Item.DisplayName = name }
+                    if (Item.Price != price) { Item.Price = price }
+
+                    player.sendModalForm("成功", "商品信息已更新", "返回", "取消", (pl, id) => {
+                        if (id != null && id == 1) {
+                            Instance?.Display();
+                        }
+                    });
+                } else {
+                    pl.sendModalForm("错误", "输入的信息有误！", "返回", "取消", (pl, id) => {
+                        if (id != null && id == 1) {
+                            Instance?.Display();
+                        }
+                    });
+                    return;
+                }
+                DataHelper.SaveData();
+            }
+        }
+
+        if (id != undefined && Instance != undefined) {
+            Index = id;
+            Item = Instance.Shop.Goods[Index];
+            player.sendForm(EditForm(), Edit);
+        }
+    }
+
+    private EditShopInfoForm(): CustomForm {
+        let form = mc.newCustomForm();
+        form = form.setTitle("§l编辑商店信息");
+        form = form.addInput("商店名称", "填入商店名称", this.Shop.Name);
+        if (this.Player.isOP()) {
+            form = form.addInput("营业额", "", this.Shop.Turnover.toString());
+            form = form.addInput("成交数", "", this.Shop.TotalSales.toString());
+        }
+
+        return form;
+    }
+
+    private static EditShopInfo(player: Player, data: Array<any>) {
+        let Instance = ShopBackstageManagementForm.Instances.get(player.xuid);
+        if (data != undefined && Instance != undefined) {
+            log(data);
+            let name = String(data[0]).trim();
+            if (name != "") {
+                if (player.isOP() && data[1] != undefined && data[2] != undefined) {
+                    let turnover = Number(data[1]);
+                    let total_sales = Number(data[2]);
+                    if (turnover > 0 && total_sales > 0) {
+                        Instance.Shop.Turnover = turnover;
+                        Instance.Shop.TotalSales = total_sales;
+                    } else {
+                        player.sendModalForm("错误", "输入的信息有误", "返回", "取消", (pl, id) => {
+                            if (id != null && id == 1) {
+                                Instance?.Display();
+                            }
+                        });
+                        return;
+                    }
+                }
+                Instance.Shop.Name = name;
+
+                player.sendModalForm("成功", "商店信息已更新", "返回", "取消", (pl, id) => {
+                    if (id != null && id == 1) {
+                        Instance?.Display();
+                    }
+                });
+            } else {
+                player.sendModalForm("错误", "输入的信息有误", "返回", "取消", (pl, id) => {
                     if (id != null && id == 1) {
                         Instance?.Display();
                     }

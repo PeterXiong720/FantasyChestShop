@@ -9,7 +9,7 @@ mc.listen("onServerStarted", () => {
 
 var DEBUG: boolean = false;
 
-var Version = "1.0.1";
+var Version = "1.1.4";
 
 var Dir = "./Plugins/PlayerShop/"
 
@@ -242,6 +242,12 @@ mc.regPlayerCmd("playershop list", "列出所有玩家商店", (player, args) =>
     });
 }, 1);
 
+mc.regPlayerCmd("playershop mgr", "GUI设置", (player: Player, args: Array<string>) => {
+    if (player.isOP()) {//多此一举
+        player.sendForm(SettingForm.MainForm(), SettingForm.Main);
+    }
+}, 1);
+
 /**
  * 监听事件
  * ============================================================
@@ -284,7 +290,7 @@ mc.listen("onOpenContainer", (player, block) => {
             if (player.isOP()) {
                 player.sendSimpleForm(
                     Format.Bold + Format.DarkAqua + "箱子商店",
-                    "Choose...",
+                    "Choose...\n注： 此页面仅对OP显示",
                     ["进入商店", "进入后台"],
                     ["", ""],
                     (pl: Player, id: number) => {
@@ -471,6 +477,8 @@ class PlayerShopData {
 
     public TotalSales!: number;
 
+    public ShowNbt: boolean = true;
+
     public Pos!: {
         x: number,
         y: number,
@@ -622,11 +630,17 @@ class CheckoutForm {
                 /*money.get(this.Player.xuid) + "金币"*/
                 GetMoney(this.Player) + "金币"
             );
+            let nbtInfo;
+            if (shop.ShowNbt) {
+                nbtInfo = "\n商品NBT：" + item.getNbt().toString();
+            } else {
+                nbtInfo = "";
+            }
             this.Form = this.Form.addLabel(
                 "商品名称：" + commodity.DisplayName +
                 "\n商品单价：" + commodity.Price +
                 "\n商品库存：" + item.getNbt().getData("Count") +
-                "\n商品NBT：" + item.getNbt().toString()
+                nbtInfo
             );
             this.Form = this.Form.addSlider(
                 "购买数量",
@@ -920,7 +934,7 @@ class ShopBackstageManagementForm {
             "§l§b商店信息§r：" +
             "\n§l店主：  §e" + mc.getPlayer(this.Shop.Shopkeeper).name +
             "\n§r§l商店名称：  §e" + this.Shop.Name +
-            "\n§r§l税后营收：  §e" + this.Shop.Turnover + "§f(税率：" + Config.TaxRate + ")" +
+            "\n§r§l税后营收：  §e" + this.Shop.Turnover + "§f(税率：百分之" + Config.TaxRate * 100 + ")" +
             "\n§r§l总成交数：  §e" + this.Shop.TotalSales +
             "\n"
         );
@@ -1072,7 +1086,10 @@ class ShopBackstageManagementForm {
 
             if (container.hasRoomFor(Item)) {
                 let tempItem = container.getItem(index);
-                if (tempItem.set(Item)) {
+                let clone = mc.newItem(Item.getNbt());
+                if (tempItem.set(clone)) {
+                    //tempItem.setNbt(clone.getNbt());
+                    tempItem.setLore(["From FantasyChestShop"]);
                     Instance.Shop.Goods.push(commodity);
                     Item.setNull();
                     player.refreshItems();
@@ -1192,9 +1209,10 @@ class ShopBackstageManagementForm {
         let form = mc.newCustomForm();
         form = form.setTitle("§l编辑商店信息");
         form = form.addInput("商店名称", "填入商店名称", this.Shop.Name);
+        form = form.addSwitch("是否显示商品NBT", this.Shop.ShowNbt);
         if (this.Player.isOP()) {
-            form = form.addInput("营业额", "", this.Shop.Turnover.toString());
-            form = form.addInput("成交数", "", this.Shop.TotalSales.toString());
+            form = form.addInput("营业额 （对非OP玩家此项会自动隐藏）", "", this.Shop.Turnover.toString());
+            form = form.addInput("成交数 （对非OP玩家此项会自动隐藏）", "", this.Shop.TotalSales.toString());
         }
 
         return form;
@@ -1205,11 +1223,12 @@ class ShopBackstageManagementForm {
         if (data != undefined && Instance != undefined) {
             log(data);
             let name = String(data[0]).trim();
-            if (name != "") {
-                if (player.isOP() && data[1] != undefined && data[2] != undefined) {
-                    let turnover = Number(data[1]);
-                    let total_sales = Number(data[2]);
-                    if (turnover > 0 && total_sales > 0) {
+            let showNbt = Boolean(data[1]);
+            if (name != "" && data[1] != undefined) {
+                let turnover = Number(data[2]);
+                let total_sales = Number(data[3]);
+                if (player.isOP() && turnover != undefined && total_sales != undefined) {
+                    if (turnover >= 0 && total_sales >= 0) {
                         Instance.Shop.Turnover = turnover;
                         Instance.Shop.TotalSales = total_sales;
                     } else {
@@ -1222,6 +1241,8 @@ class ShopBackstageManagementForm {
                     }
                 }
                 Instance.Shop.Name = name;
+                Instance.Shop.ShowNbt = showNbt;
+                DataHelper.SaveData();
 
                 player.sendModalForm("成功", "商店信息已更新", "返回", "取消", (pl, id) => {
                     if (id != null && id == 1) {
@@ -1240,5 +1261,48 @@ class ShopBackstageManagementForm {
 
     public Display() {
         this.Player.sendForm(this.MainForm(), ShopBackstageManagementForm.Main);
+    }
+}
+
+/**
+ * 游戏内GUI设置
+ */
+class SettingForm {
+
+    static MainForm(): CustomForm {
+        let form = mc.newCustomForm();
+        form = form.setTitle("设置");
+        form = form.addLabel(Format.Gray + "===================" + "§r§l插件设置§r" + Format.Gray + "==================");
+
+        form = form.addInput(Format.Aqua + "Money （默认LLMoney）§r - 经济种类", "填\"LLMoney\"或其他任意字符串", Config.Money);
+        form = form.addInput(Format.Aqua + "Registration fee§r - 开店手续费", "填整数", Config.Reg.toString());
+        form = form.addSlider(Format.Aqua + "Tax rate§r - 税率  §e百分之", 0, 95, 5, Config.TaxRate * 100);
+
+        return form;
+    }
+
+    static Main(player: Player, data: Array<any>) {
+        if (data != undefined) {
+            let money: string = data[1];
+            let regfee: number = data[2];
+            let taxrate: number = data[3];
+            if (money == undefined || money.trim() == "") {
+                player.sendModalForm("错误", "输入的Money类型有误", "确定", "取消", (pl, id) => { });
+                return;
+            } else if (regfee == undefined || Number(regfee) < 0 || !Number.isInteger(Number(regfee))) {
+                player.sendModalForm("错误", "Registration fee不能为空或小于0", "确定", "取消", (pl, id) => { });
+                return;
+            } else if (taxrate == undefined || taxrate < 0 || taxrate >= 100) {
+                player.sendModalForm("错误", "输入的数据有误", "确定", "取消", (pl, id) => { });
+                return;
+            } else {
+                Config.Money = money;
+                Config.Reg = Number(regfee);
+                Config.TaxRate = taxrate / 100;
+
+                player.sendModalForm("成功", "设置已生效", "确定", "取消", (pl, id) => { });
+                DataHelper.SaveData();
+            }
+        }
     }
 }

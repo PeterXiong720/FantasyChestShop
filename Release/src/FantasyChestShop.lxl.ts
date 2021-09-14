@@ -9,7 +9,7 @@ mc.listen("onServerStarted", () => {
 
 var DEBUG: boolean = false;
 
-var Version = "1.1.4";
+var Version = "1.2.1";
 
 var Dir = "./Plugins/PlayerShop/"
 
@@ -178,9 +178,9 @@ mc.regPlayerCmd("playershop add", "添加一个玩家商店", (player, args) => 
 });
 
 mc.regPlayerCmd("playershop", "打开玩家商店", (player, args) => {
+    let form = mc.newSimpleForm();
+    form = form.setTitle(Format.Bold + Format.DarkAqua + "所有玩家商店");
     if (Config.ShopData.length > 0) {
-        let form = mc.newSimpleForm();
-        form = form.setTitle(Format.Bold + Format.DarkAqua + "所有玩家商店");
         form = form.setContent(Format.Aqua + "注： 排名不分先后");
         Config.ShopData.forEach((value: PlayerShopData) => {
             let shopkeeper = mc.getPlayer(value.Shopkeeper).name;
@@ -195,21 +195,23 @@ mc.regPlayerCmd("playershop", "打开玩家商店", (player, args) => {
                 "§r(" + Format.Red + Format.Italics + pos + "§r)"
             );
         });
-
-        let CallBack = function (pl: Player, id: number) {
-            /*
-            log(id);
-            //*/
-            if (id != undefined) {
-                let shop = Config.ShopData[id];
-                let pos = mc.newIntPos(shop.Pos.x, shop.Pos.y, shop.Pos.z, shop.Pos.dimid);
-                let MainForm = new ShopMain(pl, pos);
-                MainForm.Display();
-            }
-        }
-
-        player.sendForm(form, CallBack);
+    } else {
+        form = form.setContent(Format.Red + "空空如也");
     }
+
+    let CallBack = function (pl: Player, id: number) {
+        /*
+        log(id);
+        //*/
+        if (id != undefined) {
+            let shop = Config.ShopData[id];
+            let pos = mc.newIntPos(shop.Pos.x, shop.Pos.y, shop.Pos.z, shop.Pos.dimid);
+            let MainForm = new ShopMain(pl, pos);
+            MainForm.Display();
+        }
+    }
+
+    player.sendForm(form, CallBack);
 });
 
 mc.regPlayerCmd("playershop remove", "管理员强制移除一个玩家商店", (player, args) => {
@@ -253,7 +255,6 @@ mc.regPlayerCmd("playershop mgr", "GUI设置", (player: Player, args: Array<stri
  * ============================================================
  */
 mc.listen("onOpenContainer", (player, block) => {
-    let result: boolean = true;
     if (Config.ShopKeepers.has(player.xuid)) {
         let blkPos = block.pos.x + " " +
             block.pos.y + " " +
@@ -280,7 +281,9 @@ mc.listen("onOpenContainer", (player, block) => {
         z: block.pos.z,
         dimid: block.pos.dimid,
     };
-    Config.ShopData.forEach((_shop) => {
+    for (let index = 0; index < Config.ShopData.length; index++) {
+        let _shop = Config.ShopData[index];
+
         /*
         log(tempPos,"\t",_shop.Pos)
         //*/
@@ -312,10 +315,9 @@ mc.listen("onOpenContainer", (player, block) => {
                 let MainForm = new ShopMain(player, block.pos);
                 MainForm.Display();
             }
-            result = false;
+            return false;
         }
-    });
-    return result;
+    }
 });
 
 mc.listen("onDestroyBlock", (player: Player, block: Block) => {
@@ -367,6 +369,53 @@ mc.listen("onPistonPush", (pistonPos: IntPos, block: Block) => {
         ) {
             return false;
         }
+    }
+});
+
+mc.listen("onHopperPushOut", (pos: FloatPos) => {
+    for (let index = 0; index < ShopPosList.length; index++) {
+        let shopPos = ShopPosList[index];
+        if (
+            pos.x > (shopPos.x - 0.7) && pos.x < (shopPos.x + 0.7) &&
+            pos.y > (shopPos.y - 0.2) && pos.y < (shopPos.y + 1.5) &&
+            pos.z > (shopPos.z - 0.7) && pos.z < (shopPos.z + 0.7) &&
+            pos.dimid == shopPos.dimid
+        ) {
+            return false;
+        }
+    }
+});
+
+mc.listen("onPlaceBlock", (player: Player, block: Block) => {
+    let CheckX = function () {
+        for (let index = 0; index < ShopPosList.length; index++) {
+            let shopPos = ShopPosList[index];
+            let shopBlock = mc.getBlock(shopPos);
+            if (shopBlock.type == block.type) {
+                if (shopPos.x + 1 == block.pos.x || shopPos.x - 1 == block.pos.x) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    let CheckZ = function () {
+        for (let index = 0; index < ShopPosList.length; index++) {
+            let shopPos = ShopPosList[index];
+            let shopBlock = mc.getBlock(shopPos);
+            if (shopBlock.type == block.type) {
+                if (shopPos.z + 1 == block.pos.z || shopPos.z - 1 == block.pos.z) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    if (block.type == "minecraft:chest" || block.type == "minecraft:trapped_chest") {
+        let result = CheckX() || CheckZ();
+        return !result;
     }
 });
 
@@ -1085,11 +1134,9 @@ class ShopBackstageManagementForm {
             let container = Instance.Chest.getContainer();
 
             if (container.hasRoomFor(Item)) {
-                let tempItem = container.getItem(index);
-                let clone = mc.newItem(Item.getNbt());
-                if (tempItem.set(clone)) {
-                    //tempItem.setNbt(clone.getNbt());
-                    tempItem.setLore(["From FantasyChestShop"]);
+                let cloneItem = mc.newItem(Item.getNbt());
+                if (container.setItem(index, cloneItem)) {
+                    cloneItem.setLore(["From FantasyChestShop"]);
                     Instance.Shop.Goods.push(commodity);
                     Item.setNull();
                     player.refreshItems();

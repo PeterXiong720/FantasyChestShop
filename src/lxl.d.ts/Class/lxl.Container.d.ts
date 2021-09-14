@@ -12,6 +12,8 @@ declare class Container {
 
     removeItem(index: number, count: number): boolean;
 
+    setItem(index: number, item: Item): Boolean;
+
     getItem(index: number): Item;
     getAllItems(): Array<Item>;
 

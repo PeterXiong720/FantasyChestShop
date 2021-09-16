@@ -1,15 +1,35 @@
 var ILAPI_PosGetLand: Function;
 var ILAPI_GetOwer: Function;
+var plugins: Array<string>;
 mc.listen("onServerStarted", () => {
+    plugins = lxl.listPlugins();
+    plugins.forEach(plugin => {
+        if (plugin == "iland-core.lua") {
+            Land = true;
+        }
+    });
+    let ILAPI_GetVersion = lxl.import("ILAPI_GetVersion");
     ILAPI_PosGetLand = lxl.import("ILAPI_PosGetLand");
     ILAPI_GetOwer = lxl.import("ILAPI_GetOwner");
-    init();
-    updateShopList();
+    setTimeout(() => {
+        try {
+            ILAPI_GetVersion();
+        } catch (err) {
+            Land = false;
+        }
+    }, 200);
+
+    setTimeout(() => {
+        init();
+        updateShopList();
+    }, 200);
 });
 
 var DEBUG: boolean = false;
 
-var Version = "1.2.1";
+var Land: boolean = false;
+
+var Version = "1.2.6";
 
 var Dir = "./Plugins/PlayerShop/"
 
@@ -18,10 +38,17 @@ var Config: Configuration;
 var ShopPosList = new Array<IntPos>();
 
 function init() {
+    logger.setConsole(true);
+    logger.setFile("./logs/FantasyChestShop.txt");
+    logger.setTitle("FantasyChestShop");
+
     log("[FantasyChestShop] =========================");
     log("[FantasyChestShop] FantasyChestShop v" + Version);
     log("[FantasyChestShop] Plugin loaded");
     log("[FantasyChestShop] 作者：PeterXiong720");
+    if (Land) {
+        log("[FantasyChestShop] 已检测到iland，已开启领地检查功能");
+    }
 
     if (!file.exists(Dir)) {
         file.mkdir(Dir);
@@ -62,7 +89,7 @@ function RemoveShop(pos: IntPos): boolean {
         dimid: pos.dimid,
     };
 
-    let removeStrShopPos = function (shop: PlayerShopData) {
+    let removeStrShopPos = function (shop: PlayerShopModel) {
         let Shopkeeper = Config.ShopKeepers.get(shop.Shopkeeper);
         if (Shopkeeper != undefined) {
             let str_blkPos = pos.x + " " +
@@ -168,10 +195,11 @@ mc.regPlayerCmd("playershop add", "添加一个玩家商店", (player, args) => 
         z: blockPos.z,
         dimid: blockPos.dimid
     });
-    if (ILAPI_GetOwer(land) != player.xuid && !player.isOP()) {
-        player.tell("只能在你拥有的领地内创建商店，若没有领地可以使用 /land new 新建一个");
-        //mc.sendCmdOutput("只能在你拥有的领地内创建商店");
-        return;
+    if (Land) {
+        if (ILAPI_GetOwer(land) != player.xuid && !player.isOP()) {
+            player.tell("只能在你拥有的领地内创建商店，若没有领地可以使用 /land new 新建一个");
+            return;
+        }
     }
     let shop = new AddShopForm(player, chest);
     shop.Display();
@@ -182,13 +210,19 @@ mc.regPlayerCmd("playershop", "打开玩家商店", (player, args) => {
     form = form.setTitle(Format.Bold + Format.DarkAqua + "所有玩家商店");
     if (Config.ShopData.length > 0) {
         form = form.setContent(Format.Aqua + "注： 排名不分先后");
-        Config.ShopData.forEach((value: PlayerShopData) => {
-            let shopkeeper = mc.getPlayer(value.Shopkeeper).name;
+        Config.ShopData.forEach((value: PlayerShopModel) => {
+            let shopkeeper = data.xuid2name(value.Shopkeeper);
             let shopName = value.Name;
-            let pos = value.Pos.x + "-" +
-                value.Pos.y + "-" +
-                value.Pos.z + "-" +
-                value.Pos.dimid;
+            let intpos = mc.newIntPos(
+                value.Pos.x,
+                value.Pos.y,
+                value.Pos.z,
+                value.Pos.dimid,
+            );
+            let pos = intpos.x + " " +
+                intpos.y + " " +
+                intpos.z + " " +
+                intpos.dim;
             form = form.addButton(
                 "§f[" + Format.DarkAqua + shopkeeper + "§f]" +
                 Format.Yellow + shopName +
@@ -205,6 +239,24 @@ mc.regPlayerCmd("playershop", "打开玩家商店", (player, args) => {
         //*/
         if (id != undefined) {
             let shop = Config.ShopData[id];
+            if (
+                (shop.Pos.dimid != pl.pos.dimid) ||
+                shop.Pos.x > pl.pos.x + 256 || shop.Pos.x < pl.pos.x - 256 ||
+                shop.Pos.z > pl.pos.z + 256 || shop.Pos.z < pl.pos.z - 256
+            ) {
+                let temp = mc.getBlock(shop.Pos.x, shop.Pos.y, shop.Pos.z, shop.Pos.dimid);
+                if (temp == undefined || !temp.hasContainer()) {
+                    pl.sendModalForm(
+                        "错误",
+                        "该商店离你太远了，无法确保其所在区块已加载\n温馨提醒：无法保证商店所在坐标适合传送，贸然传送具有一定危险性。",
+                        "确定", "传送", (pl: Player, id: number) => {
+                            if (id == 0) {
+                                pl.teleport(shop.Pos.x, shop.Pos.y, shop.Pos.z, shop.Pos.dimid);
+                            }
+                        });
+                    return;
+                }
+            }
             let pos = mc.newIntPos(shop.Pos.x, shop.Pos.y, shop.Pos.z, shop.Pos.dimid);
             let MainForm = new ShopMain(pl, pos);
             MainForm.Display();
@@ -237,7 +289,7 @@ mc.regPlayerCmd("playershop list", "列出所有玩家商店", (player, args) =>
     player.tell("商店列表如下：");
     Config.ShopKeepers.forEach((shops, pl) => {
 
-        player.tell(mc.getPlayer(pl).name + "：");
+        player.tell(data.xuid2name(pl) + "：");
         shops?.forEach(_pos => {
             player.tell("    " + _pos + "，");
         });
@@ -249,6 +301,162 @@ mc.regPlayerCmd("playershop mgr", "GUI设置", (player: Player, args: Array<stri
         player.sendForm(SettingForm.MainForm(), SettingForm.Main);
     }
 }, 1);
+
+mc.regPlayerCmd("opshop", "打开OP箱子商店", (player, args) => {
+    let form = mc.newSimpleForm();
+    form = form.setTitle(Format.Bold + Format.MinecoinGold + "所有OP商店");
+    let opShopList: Array<PlayerShopModel> = new Array();
+    if (Config.ShopData.length > 0) {
+        Config.ShopData.forEach((value: PlayerShopModel) => {
+            if (value.IsOpShop) {
+                let shopkeeper = "OP";
+                let shopName = value.Name;
+
+                opShopList.push(value);
+                form = form.addButton(
+                    "§f[" + Format.Red + shopkeeper + "§f]" +
+                    Format.Yellow + shopName
+                );
+            }
+        });
+        if (opShopList.length > 0) {
+            form = form.setContent(Format.Aqua + "OP商店列表：");
+        } else {
+            form = form.setContent(Format.Red + "空空如也");
+        }
+    } else {
+        form = form.setContent(Format.Red + "空空如也");
+    }
+
+    let CallBack = function (pl: Player, id: number) {
+
+        if (id != undefined) {
+            let shop = opShopList[id];
+            let Form = function (): { resault: boolean, form: SimpleForm } {
+                let fm = mc.newSimpleForm();
+                fm = fm.setTitle(shop.Name);
+                if (shop.Goods.length > 0) {
+                    fm = fm.setContent(
+                        Format.Bold + Format.Aqua + "欢迎光临！" +
+                        "\n您当前余额为：" + Format.MinecoinGold + GetMoney(pl)
+                    );
+                    shop.Goods.forEach((comm: Commodity) => {
+                        let name = comm.DisplayName;
+                        fm = fm.addButton(Format.Bold + name);
+                    });
+                    return { resault: true, form: fm };
+                } else {
+                    fm = fm.setContent(
+                        Format.Bold + Format.Aqua + "欢迎光临！" +
+                        "\n您当前余额为：" + Format.MinecoinGold + GetMoney(pl) +
+                        Format.Bold + Format.Red + "\n全部商品已售罄，赶快提醒店主补货吧！"
+                    );
+                    fm = fm.addButton(
+                        "I just wanna tell you how I felling",
+                        "https://img.wenhairu.com/images/2021/09/12/G4sGd.th.jpg"
+                    );
+                    fm = fm.addButton(
+                        "Gotta make you understand",
+                        "https://img.wenhairu.com/images/2021/09/12/G424H.th.jpg"
+                    );
+                    fm = fm.addButton(
+                        "Never gonna give you up\nNaver gonna let you down",
+                        "https://img.wenhairu.com/images/2021/09/11/G4geA.th.jpg"
+                    );
+                    fm = fm.addButton(
+                        "Never gonna run around and desert you",
+                        "https://img.wenhairu.com/images/2021/09/12/G4iAf.th.jpg"
+                    );
+                    return { resault: false, form: fm };
+                }
+            }
+
+            let checkoutFm = function (commodity: Commodity): CustomForm {
+                let fm = mc.newCustomForm();
+                fm = fm.setTitle(Format.DarkAqua + "结账");
+                fm = fm.addLabel(
+                    Format.Aqua + "当前余额§r：" +
+                    Format.MinecoinGold +
+                    GetMoney(pl) + "金币"
+                );
+                let nbtInfo;
+                if (shop.ShowNbt) {
+                    nbtInfo = "\n商品NBT：" + NBT.parseSNBT(commodity.Snbt);
+                } else {
+                    nbtInfo = "";
+                }
+                let count = "无限"
+                fm = fm.addLabel(
+                    "商品名称：" + commodity.DisplayName +
+                    "\n商品单价：" + commodity.Price +
+                    "\n商品库存：" + count +
+                    nbtInfo
+                );
+                fm = fm.addSlider(
+                    "购买数量",
+                    0,
+                    NBT.parseSNBT(commodity.Snbt).getData("Count"),
+                    1,
+                    1
+                );
+                return fm;
+            }
+
+            let result: any = Form();
+            let form = result.form;
+            result = result.resault;
+
+            pl.sendForm(form, (pl, id) => {
+                let commodity: Commodity = shop.Goods[id];
+                pl.sendForm(checkoutFm(commodity), (player, data: any[]) => {
+                    let nbt = NBT.parseSNBT(commodity.Snbt);
+                    nbt.setByte("Count", Number(data[2]));
+
+                    let total_price = commodity.Price * Number(data[2]);
+
+                    if (GetMoney(player) < total_price) {
+                        player.sendModalForm("错误", "余额不足，交易失败。", "确定", "取消", (pl, id) => { });
+                        return;
+                    }
+                    /*收付款*/
+                    let after_tax_money = (total_price * (1 - Config.TaxRate));//计算税后款
+                    after_tax_money = Math.round(after_tax_money);//四舍五入取整
+                    let rdMoney = ReduceMoney(player, total_price);
+                    let addMoney = AddMoney(shop.Shopkeeper, after_tax_money);
+                    if (!addMoney && player.xuid != shop.Shopkeeper) {//加钱失败，退还买主
+                        AddMoney(player.xuid, total_price);
+                        if (Config.Money == "LLMoney") {
+                            player.sendModalForm("错误", "店主收款失败，交易无法继续。", "确定", "取消", (pl, id) => { });
+                        } else {
+                            player.sendModalForm("错误", "店主收款失败，或者店主不在线，交易无法继续。", "确定", "取消", (pl, id) => { });
+                        }
+                        return;
+                    }
+                    let result: boolean = (rdMoney == true && addMoney == true) ? true : false;
+                    if (result) {
+                        let newItem = mc.newItem(nbt);
+                        player.giveItem(newItem);
+                    }
+                    //更新商店和商品信息
+                    shop.Turnover += after_tax_money;
+                    shop.TotalSales += 1;
+                    //保存数据
+                    DataHelper.SaveData();
+                    //发送“交易成功”对话框
+                    player.sendSimpleForm("成功", "交易完成。", ["确定"], [""], (pl, id) => { });
+                    //记录
+                    logger.info(player.realName + "在" + shop.Name + "完成了一笔交易" +
+                        "，金额：" + total_price +
+                        "，应纳税额：" + (total_price - after_tax_money) +
+                        "，店主实际收益：" + after_tax_money
+                    );
+                });
+            });
+        }
+    }
+
+    player.sendForm(form, CallBack);
+});
 
 /**
  * 监听事件
@@ -387,26 +595,34 @@ mc.listen("onHopperPushOut", (pos: FloatPos) => {
 });
 
 mc.listen("onPlaceBlock", (player: Player, block: Block) => {
-    let CheckX = function () {
+    let CheckBlock = function () {
         for (let index = 0; index < ShopPosList.length; index++) {
             let shopPos = ShopPosList[index];
-            let shopBlock = mc.getBlock(shopPos);
-            if (shopBlock.type == block.type) {
-                if (shopPos.x + 1 == block.pos.x || shopPos.x - 1 == block.pos.x) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
+            let shopBlock: Block;
 
-    let CheckZ = function () {
-        for (let index = 0; index < ShopPosList.length; index++) {
-            let shopPos = ShopPosList[index];
-            let shopBlock = mc.getBlock(shopPos);
-            if (shopBlock.type == block.type) {
-                if (shopPos.z + 1 == block.pos.z || shopPos.z - 1 == block.pos.z) {
-                    return true;
+            if (
+                shopPos.y == block.pos.y && shopPos.dimid == block.pos.dimid
+            ) {
+                if (
+                    (shopPos.x + 1 == block.pos.x || shopPos.x - 1 == block.pos.x) &&
+                    (shopPos.z == block.pos.z)
+                ) {
+                    shopBlock = mc.getBlock(shopPos);
+
+                    if (shopBlock == undefined) {
+                        continue;
+                    } else if (shopBlock.type == block.type) { return true };
+
+                } else if (
+                    (shopPos.z + 1 == block.pos.z || shopPos.z - 1 == block.pos.z) &&
+                    (shopPos.x == block.pos.x)
+                ) {
+
+                    shopBlock = mc.getBlock(shopPos);
+
+                    if (shopBlock == undefined) {
+                        continue;
+                    } else if (shopBlock.type == block.type) { return true };
                 }
             }
         }
@@ -414,7 +630,8 @@ mc.listen("onPlaceBlock", (player: Player, block: Block) => {
     }
 
     if (block.type == "minecraft:chest" || block.type == "minecraft:trapped_chest") {
-        let result = CheckX() || CheckZ();
+        let result = CheckBlock();
+
         return !result;
     }
 });
@@ -431,7 +648,7 @@ mc.listen("onPlaceBlock", (player: Player, block: Block) => {
 class Configuration {
     private dataHelper = new DataHelper();
 
-    ShopData: Array<PlayerShopData>;
+    ShopData: Array<PlayerShopModel>;
     Money: string;
     Reg: number;
     TaxRate: number;
@@ -466,7 +683,7 @@ class Configuration {
 class DataHelper {
     private path = Dir + "data.json";
 
-    public ShopData: Array<PlayerShopData>;
+    public ShopData: Array<PlayerShopModel>;
 
     static SaveData() {
         let temp: { [k: string]: any } = {};
@@ -514,9 +731,11 @@ class Commodity {
 }
 
 /**
- * 玩家商店数据结构
+ * 玩家商店
  */
-class PlayerShopData {
+class PlayerShopModel {
+
+    public ContainerType!: string;
 
     public Name!: string;
 
@@ -527,6 +746,8 @@ class PlayerShopData {
     public TotalSales!: number;
 
     public ShowNbt: boolean = true;
+
+    public IsOpShop: boolean = false;
 
     public Pos!: {
         x: number,
@@ -544,9 +765,9 @@ class PlayerShopData {
 class ShopMain {
     private Player: Player;
     private Form: SimpleForm;
-    private Shop: PlayerShopData | undefined;
+    private Shop: PlayerShopModel | undefined;
 
-    public static Shops: Map<string, PlayerShopData> = new Map<string, PlayerShopData>();
+    public static Shops: Map<string, PlayerShopModel> = new Map<string, PlayerShopModel>();
 
     constructor(player: Player, shopPos: IntPos) {
         this.Player = player;
@@ -685,16 +906,17 @@ class CheckoutForm {
             } else {
                 nbtInfo = "";
             }
+            let count = (shop.IsOpShop) ? "无限" : item.getNbt().getData("Count");
             this.Form = this.Form.addLabel(
                 "商品名称：" + commodity.DisplayName +
                 "\n商品单价：" + commodity.Price +
-                "\n商品库存：" + item.getNbt().getData("Count") +
+                "\n商品库存：" + count +
                 nbtInfo
             );
             this.Form = this.Form.addSlider(
                 "购买数量",
                 0,
-                item.getNbt().getData("Count"),
+                item.count,
                 1,
                 1
             );
@@ -726,7 +948,7 @@ class CheckoutForm {
                 return;
             }
             /*收付款*/
-            let after_tax_money = (total_price * (1 - Config.TaxRate));//税后款
+            let after_tax_money = (total_price * (1 - Config.TaxRate));//计算税后款
             after_tax_money = Math.round(after_tax_money);//四舍五入取整
             let rdMoney = ReduceMoney(player, total_price);
             let addMoney = AddMoney(shop.Shopkeeper, after_tax_money);
@@ -748,7 +970,9 @@ class CheckoutForm {
                 player.giveItem(newItem);
                 newNbt.destroy();
 
-                item.setNbt(item.getNbt().setByte("Count", item.getNbt().getData("Count") - Number(data[2])));
+                if (!shop.IsOpShop) {
+                    item.setNbt(item.getNbt().setByte("Count", item.getNbt().getData("Count") - Number(data[2])));
+                }
                 //如果商品售罄就删除
                 if (item.getNbt().getData("Count") == 0) {
                     item.setNull();
@@ -766,11 +990,17 @@ class CheckoutForm {
                 //更新商店和商品信息
                 shop.Turnover += after_tax_money;
                 shop.TotalSales += 1;
-                commodity.Nbt.Count -= Number(data[2]);
+                if (!shop.IsOpShop) commodity.Nbt.Count -= Number(data[2]);
                 //保存数据
                 DataHelper.SaveData();
                 //发送“交易成功”对话框
                 player.sendSimpleForm("成功", "交易完成。", ["确定"], [""], (pl, id) => { });
+                //记录
+                logger.info(player.realName + "在" + shop.Name + "完成了一笔交易" +
+                    "，金额：" + total_price +
+                    "，应纳税额：" + (total_price - after_tax_money) +
+                    "，店主实际收益：" + after_tax_money
+                );
             }
         }
         ShopMain.Shops.delete(player.xuid);
@@ -834,11 +1064,12 @@ class AddShopForm {
         log(data);
         //*/
         if (data != null) {
-            let shop = new PlayerShopData();
+            let shop = new PlayerShopModel();
             shop.Name = Format.Bold + Format.Yellow + player.name + Format.Clear + "的小店";
             shop.Shopkeeper = player.xuid;
             shop.Turnover = 0;
             shop.TotalSales = 0;
+            shop.ContainerType = mc.getBlock(player.blockPos.x, player.blockPos.y - 1, player.blockPos.z, player.blockPos.dimid).type;
             shop.Pos = {
                 x: player.blockPos.x,
                 y: player.blockPos.y - 1,
@@ -919,6 +1150,8 @@ class AddShopForm {
             //*/
             DataHelper.SaveData();
             player.sendModalForm("成功", "您的新商店已成功注册", "确定", "取消", (pl, id) => { });
+            let strPos = player.blockPos.dim + " " + player.blockPos.x + " " + player.blockPos.y + " " + player.blockPos.z;
+            logger.info(player.realName + "在<" + strPos + ">创建了一个箱子商店");
         }
     }
 
@@ -952,7 +1185,7 @@ class AddShopForm {
 class ShopBackstageManagementForm {
     public Player: Player;
     private Chest: Block;
-    private Shop!: PlayerShopData;
+    private Shop!: PlayerShopModel;
 
     private static Instances: Map<string, ShopBackstageManagementForm> = new Map();
     private static FormData: Map<string, any> = new Map();
@@ -1028,13 +1261,7 @@ class ShopBackstageManagementForm {
                 if (Instance != undefined) {
                     Instance.Player = player;
                     player.sendForm(Instance.EditItemMainForm(), ShopBackstageManagementForm.EditItemMain);
-                    /*
-                    player.sendModalForm("阿巴阿巴阿巴阿巴", "尽情期待", "返回", "取消", (pl, id) => {
-                        if (id != null && id == 1) {
-                            Instance?.Display();
-                        }
-                    });
-                    //*/
+
                 }
                 break;
             case 3:
@@ -1042,13 +1269,7 @@ class ShopBackstageManagementForm {
                 if (Instance != undefined) {
                     Instance.Player = player;
                     player.sendForm(Instance.EditShopInfoForm(), ShopBackstageManagementForm.EditShopInfo);
-                    /*
-                    player.sendModalForm("阿巴阿巴阿巴阿巴", "尽情期待", "返回", "取消", (pl, id) => {
-                        if (id != null && id == 1) {
-                            Instance?.Display();
-                        }
-                    });
-                    //*/
+
                 }
                 break;
             case 4:
@@ -1064,6 +1285,13 @@ class ShopBackstageManagementForm {
                             if (id == 1) {
                                 if (RemoveShop(chest.pos)) {
                                     pl.tell("删除成功");
+                                    let strPos = chest.pos.dim + " " + chest.pos.x + " " + chest.pos.y + " " + chest.pos.z;
+                                    logger.info(
+                                        pl.realName + "从后台删除了一个商店（\"卷款跑路\"选项）" +
+                                        "，商店名称：" + Instance?.Shop.Name +
+                                        "，坐标：" + strPos +
+                                        "，店主：" + Instance?.Shop.Shopkeeper
+                                    );
                                 }
                             } else {
                                 pl.tell("已取消");
@@ -1260,6 +1488,7 @@ class ShopBackstageManagementForm {
         if (this.Player.isOP()) {
             form = form.addInput("营业额 （对非OP玩家此项会自动隐藏）", "", this.Shop.Turnover.toString());
             form = form.addInput("成交数 （对非OP玩家此项会自动隐藏）", "", this.Shop.TotalSales.toString());
+            form = form.addSwitch("无限库存 （对非OP玩家此项会自动隐藏）", this.Shop.IsOpShop);
         }
 
         return form;
@@ -1268,16 +1497,20 @@ class ShopBackstageManagementForm {
     private static EditShopInfo(player: Player, data: Array<any>) {
         let Instance = ShopBackstageManagementForm.Instances.get(player.xuid);
         if (data != undefined && Instance != undefined) {
-            log(data);
             let name = String(data[0]).trim();
             let showNbt = Boolean(data[1]);
             if (name != "" && data[1] != undefined) {
-                let turnover = Number(data[2]);
-                let total_sales = Number(data[3]);
-                if (player.isOP() && turnover != undefined && total_sales != undefined) {
+                let turnover = data[2];
+                let total_sales = data[3];
+                let isOpShop = data[4];
+                if (player.isOP() && turnover != undefined && total_sales != undefined && isOpShop != undefined) {
+                    turnover = Number(data[2]);
+                    total_sales = Number(data[3]);
+                    isOpShop = Boolean(data[4]);
                     if (turnover >= 0 && total_sales >= 0) {
                         Instance.Shop.Turnover = turnover;
                         Instance.Shop.TotalSales = total_sales;
+                        Instance.Shop.IsOpShop = isOpShop;
                     } else {
                         player.sendModalForm("错误", "输入的信息有误", "返回", "取消", (pl, id) => {
                             if (id != null && id == 1) {
